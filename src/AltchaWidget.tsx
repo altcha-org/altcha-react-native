@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useState } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -106,9 +106,7 @@ export const AltchaWidget = forwardRef(
     const [codeChallengeCallback, setCodeChallengeCallback] = useState<
       ((code?: string) => void) | null
     >(null);
-    const [currentVerifyUrl, setCurrentVerifyUrl] = useState<string | null>(
-      verifyUrl || null
-    );
+    const currentVerifyUrlRef = useRef<string | null>(verifyUrl || null);
     const [expires, setExpires] = useState<number | null>(null);
     const [sentinelTimeZone, setSentinelTimeZone] = useState<boolean>(false);
     const [status, setStatus] = useState<
@@ -180,7 +178,7 @@ export const AltchaWidget = forwardRef(
           const config = JSON.parse(configHeader);
           if (config && typeof config === 'object') {
             if (config.verifyurl) {
-              setCurrentVerifyUrl(constructUrl(config.verifyurl));
+              currentVerifyUrlRef.current = constructUrl(config.verifyurl);
             }
             if (config.sentinel?.timeZone) {
               setSentinelTimeZone(true);
@@ -275,7 +273,7 @@ export const AltchaWidget = forwardRef(
             });
             setCodeChallengeCallback(() => resolve);
           }) as Promise<string>;
-        } else if (verifyUrl) {
+        } else if (currentVerifyUrlRef.current) {
           return requestServerVerification(payload);
         }
         return payload;
@@ -284,13 +282,13 @@ export const AltchaWidget = forwardRef(
     }
 
     async function requestServerVerification(payload: string, code?: string) {
-      if (!currentVerifyUrl) {
+      if (!currentVerifyUrlRef.current) {
         throw new Error('Parameter verifyUrl must be set.');
       }
       if (!payload) {
         throw new Error('Payload is not set.');
       }
-      const resp = await fetch(currentVerifyUrl, {
+      const resp = await fetch(currentVerifyUrlRef.current, {
         body: JSON.stringify({
           code,
           payload,
