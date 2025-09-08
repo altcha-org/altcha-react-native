@@ -38,6 +38,12 @@ For more information and documentation, visit [altcha.org](https://altcha.org).
 
 ## Installation
 
+Install peer dependencies
+
+```
+npx expo install expo-audio expo-crypto expo-localization react-native-svg
+```
+
 With npm:
 
 ```bash
@@ -49,9 +55,6 @@ Or with Yarn:
 ```bash
 yarn add react-native-altcha
 ```
-
-If your project uses Expo, no extra native setup is needed.
-If you are using bare React Native, you may need to run `pod install`.
 
 ## Usage
 
@@ -163,8 +166,8 @@ type AltchaTheme = {
 
 ```bash
 cd example
-npm install
-npm start
+yarn install
+yarn start
 ```
 
 ## License
