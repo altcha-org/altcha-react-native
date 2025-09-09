@@ -38,27 +38,30 @@ For more information and documentation, visit [altcha.org](https://altcha.org).
 
 ## Installation
 
+Install peer dependencies
+
+```
+npx expo install expo-audio expo-crypto expo-localization react-native-svg
+```
+
 With npm:
 
 ```bash
-npm install altcha-react-native
+npm install react-native-altcha
 ```
 
 Or with Yarn:
 
 ```bash
-yarn add altcha-react-native
+yarn add react-native-altcha
 ```
-
-If your project uses Expo, no extra native setup is needed.
-If you are using bare React Native, you may need to run `pod install`.
 
 ## Usage
 
 ```jsx
 import React from 'react';
 import { View } from 'react-native';
-import { AltchaWidget } from 'altcha-react-native';
+import { AltchaWidget } from 'react-native-altcha';
 
 export default function App() {
   return (
@@ -163,8 +166,8 @@ type AltchaTheme = {
 
 ```bash
 cd example
-npm install
-npm start
+yarn install
+yarn start
 ```
 
 ## License
