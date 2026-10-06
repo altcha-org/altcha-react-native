@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { getLocales } from 'expo-localization';
 
-const PACKAGE_VERSION = '2.0.0';
+const PACKAGE_VERSION = '2.1.0';
 const APP_ID = `altcha-rn/${PACKAGE_VERSION}`;
 
 // ---------------------------------------------------------------------------

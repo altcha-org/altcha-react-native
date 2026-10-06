@@ -1,6 +1,6 @@
 {
   "name": "react-native-altcha",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "ALTCHA React Native widget supporting PoW v2",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
