@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   View,
   Text,
@@ -42,7 +42,7 @@ export const AltchaCodeChallenge = ({
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
 
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [currentAudioUri, setCurrentAudioUri] = useState<string | null>(null);
   const [code, setCode] = useState<string>('');

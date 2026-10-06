@@ -33,12 +33,7 @@ export type AltchaWidgetRef = {
 };
 
 type Status =
-  | 'unverified'
-  | 'verifying'
-  | 'code'
-  | 'verified'
-  | 'expired'
-  | 'error';
+  'unverified' | 'verifying' | 'code' | 'verified' | 'expired' | 'error';
 
 type Props = {
   /**
@@ -108,15 +103,13 @@ export const AltchaWidget = forwardRef(
       ...defaultThemes[selectedColorScheme],
       ...themes[selectedColorScheme],
     };
-    const flattenedStyle = StyleSheet.flatten([
-      {
-        backgroundColor: theme.backgroundColor,
-        borderColor: theme.borderColor,
-        color: theme.textColor,
-        fontSize: 16,
-      } satisfies ViewStyle & Pick<TextStyle, 'color' | 'fontSize'>,
-      style || {},
-    ]);
+    const flattenedStyle: ViewStyle & Pick<TextStyle, 'color' | 'fontSize'> = {
+      backgroundColor: theme.backgroundColor,
+      borderColor: theme.borderColor,
+      color: theme.textColor,
+      fontSize: 16,
+      ...StyleSheet.flatten(style),
+    };
     const t: Translation = {
       ...(defaultTranslations[locale as keyof typeof defaultTranslations] ||
         defaultTranslations.en),

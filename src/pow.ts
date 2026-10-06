@@ -1,10 +1,16 @@
 import {
+  assertAlgorithm,
   bufferToHex,
   hexToBuffer,
   bufferStartsWith,
   concatBuffers,
 } from './helpers';
-import type { ChallengeParameters, Challenge, Solution } from './types';
+import type {
+  Algorithm,
+  ChallengeParameters,
+  Challenge,
+  Solution,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Crypto global accessors — lazy so polyfills loaded after this module work
@@ -12,8 +18,7 @@ import type { ChallengeParameters, Challenge, Solution } from './types';
 
 function getCrypto(): Crypto | undefined {
   return (globalThis as unknown as Record<string, unknown>).crypto as
-    | Crypto
-    | undefined;
+    Crypto | undefined;
 }
 
 function getQCrypto(): Record<string, unknown> {
@@ -105,73 +110,65 @@ export function hasArgon2Support(): boolean {
 // Key derivation
 // ---------------------------------------------------------------------------
 
-function getSubtleHashName(algorithm: string): string {
-  switch (algorithm.toUpperCase()) {
-    case 'SHA-384':
-      return 'SHA-384';
-    case 'SHA-512':
-      return 'SHA-512';
-    default:
-      return 'SHA-256';
+const ALGORITHMS: readonly Algorithm[] = [
+  'SHA-256',
+  'SHA-384',
+  'SHA-512',
+  'PBKDF2/SHA-256',
+  'PBKDF2/SHA-384',
+  'PBKDF2/SHA-512',
+  'ARGON2ID',
+  'SCRYPT',
+];
+
+async function deriveKeySha(
+  parameters: ChallengeParameters,
+  saltBuf: Uint8Array,
+  passwordBuf: Uint8Array
+): Promise<Uint8Array> {
+  const subtle = requireSubtleCrypto();
+  const { algorithm, keyLength = 32 } = parameters;
+  const iterations = Math.max(1, parameters.cost);
+  // Cast to Uint8Array<ArrayBuffer> — SubtleCrypto requires ArrayBuffer-backed views,
+  // not the broader ArrayBufferLike that TypeScript 5 infers by default.
+  let derivedKey = concatBuffers(
+    saltBuf,
+    passwordBuf
+  ) as unknown as Uint8Array<ArrayBuffer>;
+  // Each round hashes the full previous digest; truncate to keyLength only at the end,
+  // matching altcha-lib and the other language ports.
+  for (let i = 0; i < iterations; i++) {
+    derivedKey = new Uint8Array(await subtle.digest(algorithm, derivedKey));
   }
+  return derivedKey.slice(0, keyLength);
 }
 
-function getPbkdf2HashName(algorithm: string): string {
-  if (algorithm.includes('SHA-512')) return 'SHA-512';
-  if (algorithm.includes('SHA-384')) return 'SHA-384';
-  return 'SHA-256';
-}
-
-async function deriveKeySubtle(
+async function deriveKeyPbkdf2(
   parameters: ChallengeParameters,
   saltBuf: Uint8Array,
   passwordBuf: Uint8Array
 ): Promise<Uint8Array> {
   const subtle = requireSubtleCrypto();
   const { algorithm, cost, keyLength = 32 } = parameters;
-
-  // Cast to Uint8Array<ArrayBuffer> — SubtleCrypto requires ArrayBuffer-backed views,
-  // not the broader ArrayBufferLike that TypeScript 5 infers by default.
-  const saltAB = saltBuf as unknown as Uint8Array<ArrayBuffer>;
-  const passwordAB = passwordBuf as unknown as Uint8Array<ArrayBuffer>;
-
-  if (algorithm.startsWith('PBKDF2/')) {
-    const keyMaterial = await subtle.importKey(
-      'raw',
-      passwordAB,
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    const derived = await subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: saltAB,
-        iterations: cost,
-        hash: getPbkdf2HashName(algorithm),
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: keyLength * 8 },
-      true,
-      ['encrypt']
-    );
-    return new Uint8Array(await subtle.exportKey('raw', derived));
-  }
-
-  // SHA iterative: first iter = hash(salt + password), subsequent = hash(prev)
-  const iterations = Math.max(1, cost);
-  let data: Uint8Array<ArrayBuffer> = concatBuffers(
-    saltAB,
-    passwordAB
-  ) as unknown as Uint8Array<ArrayBuffer>;
-  let derivedKey!: Uint8Array<ArrayBuffer>;
-  for (let i = 0; i < iterations; i++) {
-    derivedKey = new Uint8Array(
-      await subtle.digest(getSubtleHashName(algorithm), data)
-    ).slice(0, keyLength) as unknown as Uint8Array<ArrayBuffer>;
-    data = derivedKey;
-  }
-  return derivedKey;
+  const keyMaterial = await subtle.importKey(
+    'raw',
+    passwordBuf as unknown as Uint8Array<ArrayBuffer>,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+  // deriveBits supports any key length, unlike deriving an AES key (16, 24 or 32 bytes only).
+  const derivedBits = await subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltBuf as unknown as Uint8Array<ArrayBuffer>,
+      iterations: cost,
+      hash: algorithm.slice('PBKDF2/'.length),
+    },
+    keyMaterial,
+    keyLength * 8
+  );
+  return new Uint8Array(derivedBits);
 }
 
 function deriveKeyScrypt(
@@ -234,13 +231,20 @@ function deriveKey(
   saltBuf: Uint8Array,
   passwordBuf: Uint8Array
 ): Promise<Uint8Array> {
-  switch (parameters.algorithm.toUpperCase()) {
+  const { algorithm } = parameters;
+  // Exact names only: no case folding and no fallback to SHA-256, matching altcha-lib.
+  assertAlgorithm(algorithm, ALGORITHMS);
+  switch (algorithm) {
     case 'SCRYPT':
       return deriveKeyScrypt(parameters, saltBuf, passwordBuf);
     case 'ARGON2ID':
       return deriveKeyArgon2id(parameters, saltBuf, passwordBuf);
+    case 'PBKDF2/SHA-256':
+    case 'PBKDF2/SHA-384':
+    case 'PBKDF2/SHA-512':
+      return deriveKeyPbkdf2(parameters, saltBuf, passwordBuf);
     default:
-      return deriveKeySubtle(parameters, saltBuf, passwordBuf);
+      return deriveKeySha(parameters, saltBuf, passwordBuf);
   }
 }
 
@@ -248,10 +252,36 @@ function deriveKey(
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+/** Largest counter a big-endian uint32 encodes exactly; `setUint32` wraps above it. */
+const MAX_COUNTER = 0xffffffff;
+
 function makePassword(nonceBuf: Uint8Array, counter: number): Uint8Array {
+  if (!Number.isInteger(counter) || counter < 0 || counter > MAX_COUNTER) {
+    throw new RangeError(
+      `counter must be an integer from 0 to ${MAX_COUNTER}. Got: ${counter}`
+    );
+  }
   const counterBuf = new Uint8Array(4);
   new DataView(counterBuf.buffer).setUint32(0, counter, false); // big-endian
   return concatBuffers(nonceBuf, counterBuf);
+}
+
+/**
+ * Throws unless `keyPrefix` is a non-empty hex string no longer than the key.
+ * A non-hex or overlong prefix can never be matched by any derived key.
+ */
+function assertKeyPrefix(
+  keyPrefix: unknown,
+  keyLength: number
+): asserts keyPrefix is string {
+  if (typeof keyPrefix !== 'string' || !/^[0-9a-fA-F]+$/.test(keyPrefix)) {
+    throw new Error('keyPrefix must be a non-empty hex string.');
+  }
+  if (keyPrefix.length > keyLength * 2) {
+    throw new Error(
+      `keyPrefix (${keyPrefix.length} hex characters) must not be longer than the key (keyLength: ${keyLength} bytes).`
+    );
+  }
 }
 
 function randomBytes(n: number): Uint8Array {
@@ -279,9 +309,14 @@ async function solveChain(
   timeout: number,
   startTime: number
 ): Promise<Solution | null> {
-  const { nonce, salt, keyPrefix } = challenge.parameters;
+  const { nonce, keyLength = 32, keyPrefix, salt } = challenge.parameters;
+  // Fail fast: an invalid prefix would otherwise run until the timeout.
+  assertKeyPrefix(keyPrefix, keyLength);
   const nonceBuf = hexToBuffer(nonce);
   const saltBuf = hexToBuffer(salt);
+  // Odd-length prefixes are compared as hex strings, so match case-insensitively
+  // like the byte comparison used for even-length prefixes.
+  const keyPrefixHex = keyPrefix.toLowerCase();
   const keyPrefixBuf =
     keyPrefix.length % 2 === 0 ? hexToBuffer(keyPrefix) : null;
 
@@ -312,7 +347,7 @@ async function solveChain(
 
     const matches = keyPrefixBuf
       ? bufferStartsWith(derived, keyPrefixBuf)
-      : bufferToHex(derived).startsWith(keyPrefix);
+      : bufferToHex(derived).startsWith(keyPrefixHex);
 
     if (matches) {
       return {
