@@ -1,6 +1,5 @@
 const path = require('path');
 const { getDefaultConfig } = require('@expo/metro-config');
-const exclusionList = require('metro-config/src/defaults/exclusionList');
 
 const root = path.resolve(__dirname, '..');
 const config = getDefaultConfig(__dirname);
@@ -14,13 +13,15 @@ config.resolver.nodeModulesPaths = [
   path.resolve(root, 'node_modules'),
 ];
 
-// Block root's copies of singleton packages to prevent duplicate instances
+// Block root's copies of singleton packages to prevent duplicate instances.
+// Appended to Expo's defaults, which already exclude __tests__ and .expo caches.
 const rootNodeModules = escapeRegex(path.resolve(root, 'node_modules'));
-config.resolver.blockList = exclusionList([
+config.resolver.blockList = [
+  ...[].concat(config.resolver.blockList ?? []),
   new RegExp(`^${rootNodeModules}\\/react\\/.*$`),
   new RegExp(`^${rootNodeModules}\\/react-native\\/.*$`),
   new RegExp(`^${rootNodeModules}\\/react-native-svg\\/.*$`),
-]);
+];
 
 config.resolver.unstable_enablePackageExports = true;
 
@@ -67,6 +68,12 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     if (WEB_STUBS.has(moduleName)) {
       return { filePath: webMockEmpty, type: 'sourceFile' };
     }
+  }
+
+  // react-native-quick-crypto imports `buffer`; alias it to the Buffer it ships
+  // with, as its README instructs. Web stubs quick-crypto, so native only.
+  if (moduleName === 'buffer' && platform !== 'web') {
+    moduleName = '@craftzdog/react-native-buffer';
   }
 
   // Delegate to Expo's resolver first, fall back to Metro's default
