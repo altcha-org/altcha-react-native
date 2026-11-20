@@ -16,7 +16,7 @@ import { AlertSvg, AltchaLogoSvg, CheckSvg } from './svg';
 import { applyColorOpacity } from './helpers';
 import { AltchaCodeChallenge } from './AltchaCodeChallenge';
 import { solveChallengeWorkers } from './pow';
-import { HisCollector } from './HisCollector';
+import { HisCollector, type HisData } from './HisCollector';
 import { buildHeaders } from './headers';
 import type {
   AltchaConfigHeader,
@@ -116,13 +116,31 @@ export const AltchaWidget = forwardRef(
       ...customTranslations?.[locale],
     };
 
-    // Widget-level HIS collector — captures touches within the widget itself.
-    // For global (app-wide) touch capture, the app should call
-    // HisCollector.attach() and spread the returned props on its root View.
-    const hisCollector = useMemo(() => new HisCollector(), []);
-    const hisRootProps = useMemo(() => hisCollector.attach(), [hisCollector]);
+    // Prefer the app's shared collector (HisCollector.attach() at the app
+    // root): it holds app-wide data, and the app root already receives the
+    // widget's and the Modal's touches (they bubble through the React tree),
+    // so no root props here and the app owns its lifecycle. Otherwise the
+    // widget collects with its own instance, limited to its own touches.
+    const { hisCollector, hisRootProps, ownsCollector } = useMemo(() => {
+      const shared = HisCollector.attachedShared;
+      if (shared) {
+        return { hisCollector: shared, hisRootProps: {}, ownsCollector: false };
+      }
+      const own = new HisCollector();
+      return {
+        hisCollector: own,
+        hisRootProps: own.rootProps,
+        ownsCollector: true,
+      };
+    }, []);
 
-    useEffect(() => () => hisCollector.detach(), [hisCollector]);
+    // Attach in the effect, not during render: StrictMode's simulated
+    // unmount/remount then detaches and re-attaches the own collector.
+    useEffect(() => {
+      if (!ownsCollector) return;
+      hisCollector.attach();
+      return () => hisCollector.detach();
+    }, [hisCollector, ownsCollector]);
 
     const [checked, setChecked] = useState(false);
     const [codeChallenge, setCodeChallenge] = useState<
@@ -247,10 +265,14 @@ export const AltchaWidget = forwardRef(
     async function fetchHisChallenge(hisUrl: string): Promise<Challenge> {
       const url = constructUrl(hisUrl);
       const hisData = hisCollector.export();
+      // A code challenge's verification request sends only what follows.
+      hisCollector.mark();
       log(
         '[HIS] submitting data:',
         JSON.stringify({
+          click: hisData.click.length,
           focus: hisData.focus.length,
+          key: hisData.key.length,
           pointer: hisData.pointer.length,
           scroll: hisData.scroll.length,
           touch: hisData.touch.length,
@@ -336,9 +358,16 @@ export const AltchaWidget = forwardRef(
     }
 
     async function onCodeChallengeSubmit(payload: string, code: string) {
+      const his = codeChallenge?.his
+        ? hisCollector.exportSinceMark()
+        : undefined;
       setCodeChallenge(null);
       try {
-        const serverPayload = await requestServerVerification(payload, code);
+        const serverPayload = await requestServerVerification(
+          payload,
+          code,
+          his
+        );
         codeChallengeCallback?.(serverPayload);
       } catch (err: unknown) {
         log(err);
@@ -384,7 +413,8 @@ export const AltchaWidget = forwardRef(
 
     async function requestServerVerification(
       payload: string,
-      code?: string
+      code?: string,
+      his?: HisData
     ): Promise<string> {
       if (!currentVerifyUrlRef.current) {
         throw new Error('Parameter verifyUrl must be set.');
@@ -392,6 +422,7 @@ export const AltchaWidget = forwardRef(
       const resp = await fetch(currentVerifyUrlRef.current, {
         body: JSON.stringify({
           code,
+          his,
           payload,
           timeZone: sentinelTimeZone ? getCalendars()[0]?.timeZone : undefined,
         }),
@@ -574,7 +605,7 @@ export const AltchaWidget = forwardRef(
           visible={!!codeChallenge}
           onRequestClose={() => codeChallengeCallback?.()}
         >
-          <View style={styles.codeChallengeModal}>
+          <View style={styles.codeChallengeModal} {...hisRootProps}>
             <View
               style={[
                 styles.codeChallengeContainer,

@@ -61,6 +61,8 @@ export interface Challenge {
 export interface CodeChallenge {
   audio?: string;
   image: string;
+  /** The server wants the HIS data collected since the challenge with the verification request. */
+  his?: boolean;
   length?: number;
 }
 

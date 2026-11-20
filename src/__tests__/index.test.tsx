@@ -1,5 +1,12 @@
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { StrictMode } from 'react';
+import {
+  Keyboard,
+  type EmitterSubscription,
+  type GestureResponderEvent,
+} from 'react-native';
 import { AltchaWidget } from '../AltchaWidget';
+import { HisCollector } from '../HisCollector';
 import type { Challenge, Solution } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -369,4 +376,115 @@ test('reads verifyUrl from challenge configuration property', async () => {
   expect(mockFetch.mock.calls[0][0]).toBe(
     'https://example.com/verify-from-config'
   );
+});
+
+// ---------------------------------------------------------------------------
+// HIS
+// ---------------------------------------------------------------------------
+
+test('sends the app-attached shared HIS collector data and leaves it attached', async () => {
+  const rootProps = HisCollector.attach();
+  try {
+    // A tap outside the widget, seen only by the app-root collector.
+    const touch = { pageX: 5, pageY: 7, timestamp: 1000 };
+    const event = {
+      nativeEvent: { ...touch, touches: [touch], changedTouches: [touch] },
+      target: null,
+    } as unknown as GestureResponderEvent;
+    rootProps.onTouchStart!(event);
+
+    const mockFetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({ his: { url: '/his' } }),
+        headers: { get: () => null },
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        status: 200,
+        json: async () => testChallenge,
+        headers: { get: () => null },
+      } as unknown as Response);
+
+    let receivedPayload: string | undefined;
+    const { getByTestId, unmount } = render(
+      <AltchaWidget
+        challenge="https://example.com/challenge"
+        fetch={mockFetch}
+        onVerified={(p) => {
+          receivedPayload = p;
+        }}
+      />
+    );
+
+    fireEvent.press(getByTestId('checkbox'));
+    await waitFor(() => expect(receivedPayload).toBeDefined());
+
+    const [hisUrl, hisInit] = mockFetch.mock.calls[1];
+    expect(hisUrl).toBe('https://example.com/his');
+    expect(JSON.parse(hisInit.body).his.click).toEqual([
+      [5, 7, 1000, -1, 0, 0, 2, 0],
+    ]);
+
+    unmount();
+    expect(HisCollector.attachedShared).toBe(HisCollector.shared);
+  } finally {
+    HisCollector.detach();
+  }
+});
+
+test('own HIS collector stays attached under StrictMode', async () => {
+  const listeners: { event: string; cb: () => void; removed: boolean }[] = [];
+  const addListener = jest
+    .spyOn(Keyboard, 'addListener')
+    .mockImplementation((event, cb) => {
+      const entry = { event, cb: cb as () => void, removed: false };
+      listeners.push(entry);
+      return {
+        remove: () => {
+          entry.removed = true;
+        },
+      } as unknown as EmitterSubscription;
+    });
+  try {
+    const mockFetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({ his: { url: '/his' } }),
+        headers: { get: () => null },
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        status: 200,
+        json: async () => testChallenge,
+        headers: { get: () => null },
+      } as unknown as Response);
+
+    let receivedPayload: string | undefined;
+    const { getByTestId } = render(
+      <StrictMode>
+        <AltchaWidget
+          challenge="https://example.com/challenge"
+          fetch={mockFetch}
+          onVerified={(p) => {
+            receivedPayload = p;
+          }}
+        />
+      </StrictMode>
+    );
+
+    // The keyboard opening for a focused input is a focus sample on native.
+    for (const l of listeners) {
+      if (l.event === 'keyboardDidShow' && !l.removed) l.cb();
+    }
+
+    fireEvent.press(getByTestId('checkbox'));
+    await waitFor(() => expect(receivedPayload).toBeDefined());
+
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body).his.focus).toHaveLength(
+      1
+    );
+  } finally {
+    addListener.mockRestore();
+  }
 });

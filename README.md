@@ -77,7 +77,9 @@ export default function App() {
 
 ## Human Interaction Signature (HIS)
 
-Some ALTCHA configurations require HIS data — touch patterns, scroll, keyboard focus — to distinguish humans from bots. The server signals this by responding to the challenge request with `{ his: { url: "..." } }` instead of a challenge.
+Some ALTCHA configurations require HIS data — taps, touch patterns, scroll, keyboard focus — to distinguish humans from bots. The server signals this by responding to the challenge request with `{ his: { url: "..." } }` instead of a challenge.
+
+The collector sends HIS payload v2 (`v: 2`), compatible with the ALTCHA JS widget 3.6.0: `click` samples (`[x, y, t, hold, offsetX, offsetY, pointerType, moves]`; on native, every tap), `key` samples (`[t, hold]`, no key values; web only), `untrusted` (script-dispatched events; always 0 on native) and `webdriver` (`navigator.webdriver`; always `false` on native). Every HIS request sends all samples kept since the collector started (newest 60 per channel). When the code challenge carries `his: true`, the data collected since the HIS request (the interaction while solving the code) is sent as `his` with the server verification request.
 
 For best coverage, attach the HIS collector at the **app root** so all touches are captured globally:
 
@@ -97,6 +99,8 @@ export default function App() {
   );
 }
 ```
+
+Widgets mounted while the shared collector is attached send its data (it stays attached when they unmount; `HisCollector.detach()` is up to the app). Without it, each widget collects with its own collector, limited to touches on the widget and its code challenge.
 
 To also capture scroll events, pass `getScrollHandler()` to your `ScrollView`:
 
@@ -208,14 +212,17 @@ const solution = await solveChallengeWorkers(challenge, 4);
 ## Advanced: HIS collector static API
 
 ```ts
-// Attach the global singleton and get root View props
+// Attach the global singleton and get root View props (idempotent; safe in StrictMode)
 const hisProps = HisCollector.attach(options?);  // { maxSamples?, sampleInterval? }
 
 // Stop collection
 HisCollector.detach();
 
 // Access the shared instance
-HisCollector.shared.export();  // { focus, pointer, scroll, touch, maxTouchPoints, time }
+HisCollector.shared.rootProps;  // root View props without attaching (stable across attach/detach)
+HisCollector.shared.export();  // { click, focus, key, maxTouchPoints, pointer, scroll, time, touch, untrusted, v: 2, webdriver }
+HisCollector.shared.mark();  // start the exportSinceMark() window; samples are kept
+HisCollector.shared.exportSinceMark();  // export() limited to samples since the latest mark()
 HisCollector.shared.getScrollHandler();  // onScroll handler for ScrollView
 ```
 
