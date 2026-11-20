@@ -32,14 +32,14 @@ function buildUserAgent(): string {
 
 // ---------------------------------------------------------------------------
 // buildHeaders — mirrors Flutter _buildExtraHeaders()
-// On web, returns {} — the browser controls User-Agent, Accept-Language and
-// Client Hint headers for fetch requests.
+// Every request expects a JSON response, so Accept is set on all platforms.
+// On web, the rest is omitted — the browser controls User-Agent,
+// Accept-Language and Client Hint headers for fetch requests.
 // ---------------------------------------------------------------------------
 
 export function buildHeaders(origin?: string): Record<string, string> {
-  if (Platform.OS === 'web') return {};
-
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (Platform.OS === 'web') return headers;
 
   // User-Agent
   headers['User-Agent'] = buildUserAgent();

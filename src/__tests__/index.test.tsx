@@ -204,8 +204,12 @@ test('posts to verifyUrl and calls onVerified with server payload', async () => 
   await waitFor(() => expect(receivedPayload).toBeDefined());
   expect(receivedPayload).toBe('server_payload_123');
 
+  const [, challengeInit] = mockFetch.mock.calls[0];
+  expect(challengeInit.headers.Accept).toBe('application/json');
+
   const verifyCall = mockFetch.mock.calls[1];
   expect(verifyCall[0]).toBe('https://example.com/verify');
+  expect(verifyCall[1].headers.Accept).toBe('application/json');
   expect(JSON.parse(verifyCall[1].body).payload).toBeDefined();
 });
 
